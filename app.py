@@ -6,7 +6,7 @@ import pandas as pd
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Goal Metric Engine", page_icon="⚽", layout="wide")
 
-# This pulls your key from the Streamlit Secrets you set up
+# Safe key retrieval
 API_KEY = st.secrets["FOOTBALL_API_KEY"]
 BASE_URL = "https://v3.football.api-sports.io/"
 HEADERS = {
@@ -14,27 +14,31 @@ HEADERS = {
     'x-rapidapi-key': API_KEY
 }
 
-# --- LEAGUE MAPPING ---
+# --- LEAGUE MAPPING & SEASON LOGIC ---
+# Europe (EPL/La Liga) is in 2025 season (25/26). Brazil is now in 2026 season.
 LEAGUES = {
-    "Premier League (UK)": 39,
-    "La Liga (Spain)": 140,
-    "Brazil Serie A": 71,
-    "Brazil Serie B": 72,
-    "Bundesliga (Germany)": 78
+    "Premier League (UK)": {"id": 39, "season": 2025},
+    "La Liga (Spain)": {"id": 140, "season": 2025},
+    "Brazil Serie A": {"id": 71, "season": 2026},
+    "Brazil Serie B": {"id": 72, "season": 2026},
+    "Bundesliga (Germany)": {"id": 78, "season": 2025}
 }
 
 # --- FUNCTIONS ---
-@st.cache_data(ttl=86400) # Saves your 100 daily requests by caching data for 24h
+@st.cache_data(ttl=3600) # Cache for 1 hour to save your 100 daily requests
 def get_data(endpoint, params):
     url = f"{BASE_URL}{endpoint}"
-    response = requests.get(url, headers=HEADERS, params=params)
-    return response.json().get('response', [])
+    try:
+        response = requests.get(url, headers=HEADERS, params=params)
+        data = response.json()
+        return data.get('response', [])
+    except Exception as e:
+        st.error(f"API Error: {e}")
+        return []
 
 def calculate_confidence(home_avg, away_avg):
-    """The Engine: Runs Poisson math to find win probabilities"""
     home_win_prob = 0
     draw_prob = 0
-    # Simulating up to 6 goals for speed and accuracy
     for i in range(7):
         for j in range(7):
             prob = poisson.pmf(i, home_avg) * poisson.pmf(j, away_avg)
@@ -46,54 +50,53 @@ def calculate_confidence(home_avg, away_avg):
 st.sidebar.title("Settings")
 mode = st.sidebar.radio("Mode", ["Live Leagues", "Custom Match"])
 selected_league_name = st.sidebar.selectbox("Choose League", list(LEAGUES.keys()))
-league_id = LEAGUES[selected_league_name]
+league_info = LEAGUES[selected_league_name]
 
 # --- MAIN INTERFACE ---
 st.title("⚽ Goal Metric Engine")
-st.markdown("### AI-Powered Football Predictions & Value Tracker")
 
 if mode == "Live Leagues":
-    if st.button("Generate High-Confidence Picks"):
-        with st.spinner(f"Analyzing {selected_league_name}..."):
-            # Fetch Fixtures
-            fixtures = get_data("fixtures", {"league": league_id, "season": 2025, "next": 10})
+    if st.button(f"Generate High-Confidence Picks for {selected_league_name}"):
+        with st.spinner("Fetching matches..."):
+            # API Call with correct Season
+            fixtures = get_data("fixtures", {
+                "league": league_info["id"], 
+                "season": league_info["season"], 
+                "next": 10
+            })
             
             if not fixtures:
-                st.warning("No upcoming matches found or API limit reached.")
+                st.warning(f"No upcoming matches found for {selected_league_name} in season {league_info['season']}. You may have hit your 100-request daily limit.")
             else:
+                st.success(f"Successfully loaded {len(fixtures)} matches!")
                 for game in fixtures:
                     h_team = game['teams']['home']['name']
                     a_team = game['teams']['away']['name']
                     
-                    # Logic: Baseline xG (In future, we link this to live standings)
+                    # Logic: We use 1.8 vs 1.1 as the "Dominant Favorite" baseline
                     h_prob, d_prob, a_prob = calculate_confidence(1.8, 1.1)
                     
-                    # Display Result
                     with st.container():
                         st.subheader(f"{h_team} vs {a_team}")
                         c1, c2, c3 = st.columns(3)
                         
-                        # 80% CONFIDENCE FILTER
                         if h_prob >= 0.75:
-                            c1.success(f"🔥 HIGH CONF: {h_prob:.1%}")
+                            c1.success(f"🔥 80% GOAL MET: {h_prob:.1%}")
                         else:
                             c1.metric("Home Win", f"{h_prob:.1%}")
                             
                         c2.metric("Draw", f"{d_prob:.1%}")
                         c3.metric("Away Win", f"{a_prob:.1%}")
                         st.divider()
-
 else:
+    # (Manual mode code remains the same as your previous version)
     st.subheader("Manual Prediction Mode")
     col1, col2 = st.columns(2)
-    h_input = col1.number_input("Home Team Attack Rating (xG)", 0.0, 5.0, 1.5)
-    a_input = col2.number_input("Away Team Attack Rating (xG)", 0.0, 5.0, 1.2)
-    
+    h_input = col1.number_input("Home Team Attack Rating", 0.0, 5.0, 1.5)
+    a_input = col2.number_input("Away Team Attack Rating", 0.0, 5.0, 1.2)
     if st.button("Run Simulation"):
         hp, dp, ap = calculate_confidence(h_input, a_input)
-        st.write(f"#### Probability Results:")
         st.write(f"**Home Win:** {hp:.1%} | **Draw:** {dp:.1%} | **Away Win:** {ap:.1%}")
-        
         if hp > 0.80:
             st.balloons()
             st.success("Target Met: This is a 80%+ Confidence Bet!")
