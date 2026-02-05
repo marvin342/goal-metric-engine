@@ -6,99 +6,116 @@ import math
 import time
 
 # --- PAGE SETUP ---
-st.set_page_config(page_title="SHARP SOCCER AI v11 - ELITE", layout="wide", page_icon="☢️")
+st.set_page_config(page_title="SHARP SOCCER AI v11.2 - GLOBAL ELITE", layout="wide", page_icon="⚽")
 
-# --- CUSTOM CSS FOR ELITE UI ---
+# --- PRO UI DESIGN ---
 st.markdown("""
     <style>
-    .metric-card { background: #1a1c24; border: 1px solid #3d444d; padding: 20px; border-radius: 12px; }
-    .nuke-alert {
-        background: linear-gradient(90deg, #ff4b2b 0%, #ff416c 100%);
-        color: white; font-weight: 900; padding: 20px; border-radius: 10px;
-        text-align: center; border: 2px solid #fff; box-shadow: 0 0 15px rgba(255, 75, 43, 0.6);
+    .metric-card { background: #111; border: 1px solid #444; padding: 20px; border-radius: 10px; }
+    .nuke-header {
+        background: linear-gradient(90deg, #1a1a1a 0%, #d40000 100%);
+        color: white; padding: 15px; border-radius: 8px; text-align: center;
+        font-weight: 800; font-size: 22px; text-transform: uppercase;
+        border: 1px solid #ff4b4b; box-shadow: 0 0 20px rgba(212, 0, 0, 0.4);
     }
+    .edge-box { color: #00ff00; font-weight: bold; font-size: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
 API_KEY = "2bbe95bafab32dd8fa0be8ae23608feb"
 
-# --- THE DIXON-COLES ENGINE ---
-def get_elite_probs(xg_total):
-    # Split xG based on a 52/48 Home/Away distribution (The Global Pro Standard)
-    h_xg = xg_total * 0.52
-    a_xg = xg_total * 0.48
+# --- LEAGUE REGISTRY ---
+LEAGUES = {
+    "Spain LaLiga": "soccer_spain_la_liga",
+    "Italy Serie A": "soccer_italy_serie_a",
+    "Italy Serie B": "soccer_italy_serie_b",
+    "Brazil Serie A": "soccer_brazil_campeonato",
+    "Germany Bundesliga": "soccer_germany_bundesliga"
+}
+
+# --- THE GOD-TIER ENGINE ---
+def get_god_mode_probs(xg_total, league_key):
+    # Adjust Home/Away bias based on league profile
+    # Brazil and Italy B tend to have stronger home-field advantages
+    h_bias = 0.54 if league_key in ["soccer_brazil_campeonato", "soccer_italy_serie_b"] else 0.52
+    h_xg, a_xg = xg_total * h_bias, xg_total * (1 - h_bias)
     
-    # Probability Matrix (12x12 Scorelines)
-    matrix = {}
-    o15, o25, o35 = 0, 0, 0
-    
+    probs = {"1.5": 0, "2.5": 0, "3.5": 0}
     for i in range(12):
         for j in range(12):
-            prob = poisson.pmf(i, h_xg) * poisson.pmf(j, a_xg)
-            
-            # Dixon-Coles Adjustment for low-scoring draws
-            if (i == 0 and j == 0) or (i == 1 and j == 1):
-                prob *= 1.12 # Increase 0-0 and 1-1 probability by 12%
-            
-            total = i + j
-            if total > 1.5: o15 += prob
-            if total > 2.5: o25 += prob
-            if total > 3.5: o35 += prob
-            
-    return {"1.5": o15, "2.5": o25, "3.5": o35}
+            p = poisson.pmf(i, h_xg) * poisson.pmf(j, a_xg)
+            # Dixon-Coles Adjustment
+            if (i == 0 and j == 0) or (i == 1 and j == 1): p *= 1.12
+            if i + j > 1.5: probs["1.5"] += p
+            if i + j > 2.5: probs["2.5"] += p
+            if i + j > 3.5: probs["3.5"] += p
+    return probs
 
 # =======================
-# 📡 ELITE COMMAND CENTER
+# 📡 SIDEBAR CONTROLS
 # =======================
-st.title("⚽ SHARP AI v11: MARKET DIVERGENCE ENGINE")
+st.sidebar.title("☢️ CONTROL CENTER")
+selected_labels = st.sidebar.multiselect("Select Leagues to Scan", list(LEAGUES.keys()), default=["Spain LaLiga", "Germany Bundesliga"])
+nuke_val = st.sidebar.slider("Nuke Sensitivity (Edge %)", 0.05, 0.20, 0.09)
+st.sidebar.info("App refreshes every 5 mins to catch market moves.")
 
+# =======================
+# 📡 DATA FETCHING
+# =======================
 @st.cache_data(ttl=300)
-def get_live_market():
-    url = "https://api.the-odds-api.com/v4/sports/soccer/odds"
-    params = {"apiKey": API_KEY, "regions": "uk,us", "markets": "totals", "oddsFormat": "decimal"}
-    return requests.get(url, params=params).json()
+def fetch_league_data(league_id):
+    url = f"https://api.the-odds-api.com/v4/sports/{league_id}/odds"
+    params = {"apiKey": API_KEY, "regions": "uk,eu", "markets": "totals", "oddsFormat": "decimal"}
+    res = requests.get(url, params=params)
+    return res.json() if res.status_code == 200 else []
 
-matches = get_live_market()
+# =======================
+# 🚀 MAIN DASHBOARD
+# =======================
+st.title("⚽ SHARP AI: GLOBAL VALUE SCANNER")
+found_any = False
 
-if matches:
-    for m in matches[:40]:
-        try:
-            # 1. Get Market Price
-            outcomes = m['bookmakers'][0]['markets'][0]['outcomes']
-            o25_price = next(o['price'] for o in outcomes if o['name'] == 'Over' and o['point'] == 2.5)
-            market_implied = 1 / o25_price
-            
-            # 2. Market-Implied xG Formula (Professional Grade)
-            # This is the 'Golden Ratio' for soccer totals
-            target_xg = 2.45 + (1.3 / math.log(o25_price + 0.08))
-            
-            # 3. Run Elite Math
-            probs = get_elite_probs(target_xg)
-            sharp_prob = probs["2.5"]
-            
-            # --- THE DIVERGENCE SCORE ---
-            # If the Sharp Prob is higher than the Market Prob, we have an 'Edge'
-            edge = sharp_prob - market_implied
-
-            # ONLY SHOW ELITE PICKS (Strong Filter)
-            if sharp_prob > 0.76 or edge > 0.09:
-                with st.expander(f"☢️ {m['home_team']} vs {m['away_team']} | EDGE: {edge:+.1%}"):
-                    if edge > 0.12:
-                        st.markdown('<div class="nuke-alert">🚨 ELITE VALUE NUKE: OVER 2.5 🚨</div>', unsafe_allow_html=True)
-                        st.balloons()
-                    
-                    c = st.columns(4)
-                    c[0].metric("Market Price", f"{o25_price}")
-                    c[1].metric("Sharp Confidence", f"{sharp_prob:.1%}")
-                    c[2].metric("Target xG", f"{target_xg:.2f}")
-                    
-                    # Kelly Criterion Betting Strategy (1/4 Kelly)
-                    b = o25_price - 1
-                    q = 1 - sharp_prob
-                    kelly = ( (b * sharp_prob) - q ) / b
-                    stake = max(0, round(kelly * 0.25 * 100, 1)) # Suggesting % of bankroll
-                    
-                    c[3].metric("Stake Guide", f"{stake}%", delta="Kelly Limit")
-                    st.write(f"**Insight:** This market is mispriced by {edge*100:.1f}%. The risk-to-reward ratio is optimal.")
-        except:
+if not selected_labels:
+    st.warning("Please select at least one league in the sidebar.")
+else:
+    for label in selected_labels:
+        st.subheader(f"📡 Scanning {label}...")
+        matches = fetch_league_data(LEAGUES[label])
+        
+        if not matches:
+            st.write("No upcoming matches found for this league today.")
             continue
+
+        for m in matches:
+            try:
+                # Find Over 2.5 Market
+                bookie = m['bookmakers'][0]
+                market = bookie['markets'][0]
+                o25 = next(o for o in market['outcomes'] if o['name'] == 'Over' and o['point'] == 2.5)
+                price = o25['price']
+                
+                # Math Engine
+                target_xg = 2.48 + (1.28 / math.log(price + 0.08))
+                ai_preds = get_god_mode_probs(target_xg, LEAGUES[label])
+                edge = ai_preds["2.5"] - (1 / price)
+
+                if edge >= nuke_val:
+                    found_any = True
+                    with st.container():
+                        st.markdown(f'<div class="nuke-header">☢️ {label} NUKE: {m["home_team"]} v {m["away_team"]} ☢️</div>', unsafe_allow_html=True)
+                        st.balloons()
+                        
+                        c = st.columns(4)
+                        c[0].metric("Market Odds", f"{price}")
+                        c[1].markdown(f"<div class='edge-box'>EDGE: {edge:+.1%}</div>", unsafe_allow_html=True)
+                        c[2].metric("Sharp Prob", f"{ai_preds['2.5']:.1%}")
+                        
+                        # Kelly Stake
+                        b = price - 1
+                        kelly = ((b * ai_preds["2.5"]) - (1 - ai_preds["2.5"])) / b
+                        c[3].metric("Stake Guide", f"{max(0, round(kelly * 0.25 * 100, 1))}%")
+                        st.divider()
+            except: continue
+
+if not found_any and selected_labels:
+    st.info("No 'Nuke' opportunities found in these leagues right now. The market is currently efficient.")
