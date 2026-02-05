@@ -6,85 +6,103 @@ import math
 import time
 
 # --- PAGE SETUP ---
-st.set_page_config(page_title="SHARP SOCCER AI v9.1", layout="wide", page_icon="⚽")
+st.set_page_config(page_title="SHARP SOCCER AI v10 - ELITE", layout="wide", page_icon="☢️")
 
-# --- PRO STYLING ---
+# --- STYLING ---
 st.markdown("""
     <style>
-    .stMetric { background-color: #161b22; padding: 15px; border-radius: 10px; border: 1px solid #30363d; }
-    .nuke-alert {
-        background: linear-gradient(90deg, #ff4b4b, #ff0000);
-        color: white; padding: 20px; border-radius: 15px;
-        text-align: center; font-size: 28px; font-weight: 900;
-        border: 2px solid white; animation: pulse 1s infinite;
+    .nuke-card {
+        background: linear-gradient(135deg, #1e1e1e 0%, #000000 100%);
+        border: 2px solid #ff0000; border-radius: 15px; padding: 25px;
+        box-shadow: 0 0 20px rgba(255, 0, 0, 0.4); margin-bottom: 20px;
     }
-    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
+    .value-badge {
+        background-color: #4CAF50; color: white; padding: 5px 10px;
+        border-radius: 5px; font-weight: bold; font-size: 14px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 API_KEY = "2bbe95bafab32dd8fa0be8ae23608feb"
 
-# --- SMART CACHE (REFRESHES EVERY 10 MINS) ---
-@st.cache_data(ttl=600)
-def fetch_live_market_data():
-    url = f"https://api.the-odds-api.com/v4/sports/soccer/odds"
-    params = {"apiKey": API_KEY, "regions": "uk", "markets": "totals", "oddsFormat": "decimal"}
-    try:
-        response = requests.get(url, params=params)
-        return response.json(), time.strftime("%H:%M:%S")
-    except:
-        return [], "Offline"
-
-# --- THE "BRAIN" ---
-def get_advanced_probs(avg_total):
-    h_exp = avg_total * 0.55
-    a_exp = avg_total * 0.45
-    probs = {"1.5": 0, "2.5": 0, "3.5": 0}
+# --- ADVANCED ENGINE ---
+def calculate_sharp_probs(target_xg, league_bias=1.0):
+    # Apply league-specific scoring volatility
+    adj_xg = target_xg * league_bias
+    h_exp = adj_xg * 0.53  # Slight home bias
+    a_exp = adj_xg * 0.47
+    
+    o15, o25, o35 = 0, 0, 0
     for i in range(12):
         for j in range(12):
             p = poisson.pmf(i, h_exp) * poisson.pmf(j, a_exp)
-            if i + j > 1.5: probs["1.5"] += p
-            if i + j > 2.5: probs["2.5"] += p
-            if i + j > 3.5: probs["3.5"] += p
-    return probs
+            if i + j > 1.5: o15 += p
+            if i + j > 2.5: o25 += p
+            if i + j > 3.5: o35 += p
+    return {"1.5": o15, "2.5": o25, "3.5": o35}
+
+def get_kelly_stake(prob, odds, bankroll=1000):
+    """Calculates optimal bet size using fractional Kelly (0.25)."""
+    b = odds - 1
+    q = 1 - prob
+    fractional_kelly = 0.25 * ((b * prob - q) / b)
+    return max(0, round(fractional_kelly * bankroll, 2))
 
 # =======================
-# 📡 PRO LIVE DASHBOARD
+# 📡 ELITE LIVE FEED
 # =======================
-data, last_update = fetch_live_market_data()
+st.title("☢️ SHARP SOCCER AI: ELITE VALUE DETECTOR")
+st.sidebar.header("Control Center")
+league_filter = st.sidebar.multiselect("Focus Leagues", ["soccer_epl", "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_italy_serie_a"])
+bankroll = st.sidebar.number_input("Your Bankroll ($)", 100, 100000, 1000)
 
-st.title("⚽ SHARP SOCCER AI")
-st.write(f"**Last Market Sync:** {last_update} (Refreshes automatically every 10 mins)")
+@st.cache_data(ttl=300)
+def fetch_data():
+    url = "https://api.the-odds-api.com/v4/sports/soccer/odds"
+    params = {"apiKey": API_KEY, "regions": "uk", "markets": "totals", "oddsFormat": "decimal"}
+    return requests.get(url, params=params).json()
 
-if not data:
-    st.warning("No new matches detected. This happens when there are no games in the next 24-48 hours.")
-else:
-    # Filter only for the next 48 hours to keep it "Fresh"
-    for match in data[:30]:
+matches = fetch_data()
+
+if matches:
+    for m in matches[:30]:
         try:
-            # Logic to find the specific 'Over 2.5' line
-            bookie = match['bookmakers'][0]
-            market = bookie['markets'][0]
-            o25_outcome = next(o for o in market['outcomes'] if o['name'] == 'Over' and o['point'] == 2.5)
-            price = o25_outcome['price']
+            # Market Odds Extraction
+            outcomes = m['bookmakers'][0]['markets'][0]['outcomes']
+            o25_price = next(o['price'] for o in outcomes if o['name'] == 'Over' and o['point'] == 2.5)
+            market_prob = 1 / o25_price
             
-            # Convert Price to Target xG
-            implied_goals = 2.5 + (1.0 / math.log(price + 0.05))
-            preds = get_advanced_probs(implied_goals)
+            # AI Probability Logic
+            implied_xg = 2.5 + (1.2 / math.log(o25_price + 0.1))
+            sharp_metrics = calculate_sharp_probs(implied_xg)
+            sharp_prob = sharp_metrics["2.5"]
             
-            # THE NUKE FILTER (Only high confidence)
-            if preds["2.5"] > 0.70:
+            # --- VALUE CALCULATION ---
+            # We look for a 5% difference between our math and the bookie
+            edge = sharp_prob - market_prob
+            
+            if sharp_prob > 0.75:
                 with st.container():
-                    st.markdown(f"### {match['home_team']} vs {match['away_team']}")
+                    st.markdown(f"""
+                    <div class="nuke-card">
+                        <span class="value-badge">EDGE: {edge:+.1%}</span>
+                        <h2 style='color:white;'>{m['home_team']} vs {m['away_team']}</h2>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
-                    if preds["2.5"] > 0.82:
-                        st.markdown('<div class="nuke-alert">☢️ MAXIMUM CONVICTION NUKE ☢️</div>', unsafe_allow_html=True)
+                    if edge > 0.08:
+                        st.error("🚨 HIGH VALUE NUKE DETECTED 🚨")
                         st.balloons()
+
+                    cols = st.columns(4)
+                    cols[0].metric("Market Odds", f"{o25_price}")
+                    cols[1].metric("Sharp Conf.", f"{sharp_prob:.1%}")
+                    cols[2].metric("Target xG", f"{implied_xg:.2f}")
                     
-                    c = st.columns(3)
-                    c[0].metric("Bookie Price", f"{price}")
-                    c[1].metric("Sharp Confidence", f"{preds['2.5']:.1%}")
-                    c[2].metric("Expected Goals", f"{implied_goals:.2f}")
+                    stake = get_kelly_stake(sharp_prob, o25_price, bankroll)
+                    cols[3].metric("Suggested Bet", f"${stake}", delta="Kelly optimized")
                     st.divider()
         except:
             continue
+else:
+    st.info("Searching for fresh market signals...")
