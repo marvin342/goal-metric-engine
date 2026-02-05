@@ -1,69 +1,84 @@
 import streamlit as st
+import requests
 import pandas as pd
-import soccerdata as sd
 from scipy.stats import poisson
 
-st.set_page_config(page_title="Goal Metric Engine", layout="wide")
+st.set_page_config(page_title="Goal Metric Engine v3", layout="wide", page_icon="⚽")
 
-st.title("⚽ Goal Metric Engine: Global Edition")
+# --- CONFIG ---
+API_KEY = st.secrets["ODDS_API_KEY"]
+BASE_URL = "https://api.the-odds-api.com/v4/sports/"
 
-# --- UPDATED LEAGUE MAPPING ---
-# We use the exact IDs that soccerdata's FBref reader expects
-leagues_map = {
-    "Premier League (UK)": "ENG-Premier League",
-    "La Liga (Spain)": "ESP-La Liga",
-    "Brazil Serie A": "BRA-Serie A",
-    "Bundesliga (GER)": "GER-Bundesliga"
+# --- LEAGUE MAPPING ---
+# These are the exact IDs for The-Odds-API
+LEAGUES = {
+    "Premier League (UK)": "soccer_epl",
+    "Brazil Serie A": "soccer_brazil_campeonato",
+    "La Liga (Spain)": "soccer_spain_la_liga",
+    "Bundesliga (Germany)": "soccer_germany_bundesliga"
 }
 
-selected_label = st.sidebar.selectbox("Select League", list(leagues_map.keys()))
-league_id = leagues_map[selected_label]
+def get_live_odds(sport_key):
+    params = {
+        'apiKey': API_KEY,
+        'regions': 'uk,us',
+        'markets': 'h2h',
+        'oddsFormat': 'decimal'
+    }
+    response = requests.get(f"{BASE_URL}{sport_key}/odds", params=params)
+    if response.status_code != 200:
+        st.error(f"API Error: {response.json().get('message', 'Failed to fetch data')}")
+        return []
+    return response.json()
 
-# Determine season based on the league
-season = "2026" if "Brazil" in selected_label else "2526"
+def calculate_probs(home_xg, away_xg):
+    """
+    Using Poisson distribution to calculate 
+    Home Win, Draw, and Away Win probabilities.
+    """
+    home_win_prob = 0
+    draw_prob = 0
+    for i in range(7): # Goals 0 to 6
+        for j in range(7):
+            # probability of home scoring i and away scoring j
+            p = poisson.pmf(i, home_xg) * poisson.pmf(j, away_xg)
+            if i > j: home_win_prob += p
+            elif i == j: draw_prob += p
+    return home_win_prob, draw_prob, (1 - home_win_prob - draw_prob)
 
-@st.cache_data(ttl=3600)
-def get_data(lg, sn):
-    try:
-        # We call the FBref class directly to avoid the 'Big 5' restriction
-        fbref = sd.FBref(leagues=[lg], seasons=[sn])
-        schedule = fbref.read_schedule()
+# --- UI ---
+st.title("⚽ Goal Metric Engine v3")
+st.write("Comparing AI Poisson Math vs. Live Bookie Odds")
+
+selected_league = st.sidebar.selectbox("Choose League", list(LEAGUES.keys()))
+sport_key = LEAGUES[selected_league]
+
+if st.button(f"Analyze {selected_league}"):
+    with st.spinner("Fetching live market data..."):
+        matches = get_live_odds(sport_key)
         
-        # Filter: Only games that haven't happened (no score)
-        # FBref schedule usually uses 'score' or 'result' columns
-        upcoming = schedule[schedule['result'].isna()]
-        return upcoming.reset_index()
-    except Exception as e:
-        st.error(f"Logic Error: {e}")
-        return pd.DataFrame()
-
-if st.button(f"Analyze {selected_label}"):
-    with st.spinner("Scraping live data..."):
-        df = get_data(league_id, season)
-        
-        if df.empty:
-            st.warning("No upcoming matches found. Try a different league or check if the season has started.")
+        if not matches:
+            st.warning("No upcoming matches found for this league.")
         else:
-            st.success(f"Found {len(df.head(10))} upcoming matches!")
-            for _, row in df.head(10).iterrows():
-                # Column names can vary, so we use .get() to be safe
-                home = row.get('home_team', 'Home Team')
-                away = row.get('away_team', 'Away Team')
-                date = row.get('date', 'TBD')
+            for match in matches[:10]:
+                home = match['home_team']
+                away = match['away_team']
                 
-                # Our 80% Win Logic (Poisson)
-                # Simulating a strong home favorite (1.9 xG vs 1.1 xG)
-                prob = 0
-                for i in range(6):
-                    for j in range(i):
-                        prob += poisson.pmf(i, 1.9) * poisson.pmf(j, 1.1)
+                # AI Simulation: 
+                # For now, we use 1.9 (Home) vs 1.2 (Away) as a baseline favorite
+                # In the next step, we can pull real xG for these teams!
+                h_prob, d_prob, a_prob = calculate_probs(1.9, 1.2)
                 
                 with st.container():
-                    st.write(f"**Date:** {date}")
-                    col1, col2 = st.columns([2, 1])
-                    col1.subheader(f"{home} vs {away}")
-                    if prob > 0.75:
-                        col2.success(f"🔥 HIGH CONF: {prob:.1%}")
+                    st.subheader(f"{home} vs {away}")
+                    c1, c2, c3 = st.columns(3)
+                    
+                    # Highlight 80% Confidence
+                    if h_prob >= 0.75: # Close to 80% threshold
+                        c1.success(f"🔥 AI WIN: {h_prob:.1%}")
                     else:
-                        col2.info(f"Win Prob: {prob:.1%}")
+                        c1.metric("AI Home Win", f"{h_prob:.1%}")
+                    
+                    c2.metric("AI Draw", f"{d_prob:.1%}")
+                    c3.metric("AI Away Win", f"{a_prob:.1%}")
                     st.divider()
