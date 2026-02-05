@@ -1,89 +1,92 @@
 import streamlit as st
-import requests
 import pandas as pd
 from scipy.stats import poisson
 
-st.set_page_config(page_title="Goal Metric Engine v4", layout="wide", page_icon="⚽")
+st.set_page_config(page_title="Sharp Goal Engine", layout="wide")
 
-# --- CONFIG ---
-API_KEY = st.secrets.get("ODDS_API_KEY", "2bbe95bafab32dd8fa0be8ae23608feb")
-BASE_URL = "https://api.the-odds-api.com/v4/sports/"
+# --- LEAGUE AVERAGES (2025/26 Season Data) ---
+# These 'sharpen' the prediction by providing the baseline for the specific league
+LEAGUE_STATS = {
+    "Premier League": {"h_avg": 1.58, "a_avg": 1.26},
+    "Brazil Serie A": {"h_avg": 1.35, "a_avg": 1.10},
+    "La Liga": {"h_avg": 1.45, "a_avg": 1.15}
+}
 
-# --- SHARP MATH ENGINE ---
-def calculate_sharp_metrics(h_exp, a_exp):
-    """Calculates win probs, scorelines, and 'Crazy Game' (Over 4.5) risk."""
-    h_win, draw, away_win = 0, 0, 0
-    over_4_5 = 0
+def calculate_market_probs(h_exp, a_exp):
+    """Calculates all goal markets using a 10x10 score matrix."""
+    matrix = {}
+    over_1_5, over_2_5, over_3_5, over_4_5 = 0, 0, 0, 0
     
-    # Calculate probabilities up to 10 goals for 'Crazy Games'
-    for i in range(11):
-        for j in range(11):
+    for i in range(10): # Home goals
+        for j in range(10): # Away goals
             prob = poisson.pmf(i, h_exp) * poisson.pmf(j, a_exp)
-            if i > j: h_win += prob
-            elif i == j: draw += prob
-            else: away_win += prob
+            total_goals = i + j
             
-            if (i + j) > 4: over_4_5 += prob
+            if total_goals > 1.5: over_1_5 += prob
+            if total_goals > 2.5: over_2_5 += prob
+            if total_goals > 3.5: over_3_5 += prob
+            if total_goals > 4.5: over_4_5 += prob
             
-    return h_win, draw, away_win, over_4_5
+    return {
+        "O1.5": over_1_5,
+        "O2.5": over_2_5,
+        "O3.5": over_3_5,
+        "O4.5": over_4_5
+    }
 
-# --- UI SECTIONS ---
-tab1, tab2 = st.tabs(["🔥 Live Value Tracker", "🎯 Custom Sharp Section"])
+st.title("🎯 Sharp Goal Metric Engine")
 
-with tab1:
-    st.header("Live Predictions")
-    # Mapping for The-Odds-API
-    league_keys = {"Premier League": "soccer_epl", "Brazil Serie A": "soccer_brazil_campeonato"}
-    selected = st.selectbox("League", list(league_keys.keys()))
-    
-    if st.button("Fetch & Analyze"):
-        # Note: In a full version, we'd pull league stats (averages) here.
-        # For now, we simulate different strengths to show the code works.
-        res = requests.get(f"{BASE_URL}{league_keys[selected]}/odds", params={'apiKey': API_KEY, 'regions': 'uk', 'oddsFormat': 'decimal'})
-        matches = res.json()
-        
-        for m in matches[:8]:
-            # DYNAMIC SIMULATION: Assigns random xG based on team names to demonstrate variance
-            h_xg = 1.4 + (len(m['home_team']) % 5) * 0.2
-            a_xg = 1.0 + (len(m['away_team']) % 5) * 0.1
-            
-            hw, dr, aw, crazy = calculate_sharp_metrics(h_xg, a_xg)
-            
-            with st.expander(f"{m['home_team']} vs {m['away_team']} (xG: {h_xg:.1f} - {a_xg:.1f})"):
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Home Win", f"{hw:.1%}")
-                c2.metric("Draw", f"{dr:.1%}")
-                c3.metric("Away Win", f"{aw:.1%}")
-                
-                if crazy > 0.15: # High threshold for Over 4.5 goals
-                    c4.warning(f"⚠️ CRAZY GAME: {crazy:.1%}")
-                else:
-                    c4.write(f"Goal Flow: {crazy:.1%}")
+# --- SIDEBAR: LEAGUE STATS ---
+st.sidebar.header("Sharp Settings")
+selected_lg = st.sidebar.selectbox("Select League", list(LEAGUE_STATS.keys()))
+lg_h_avg = LEAGUE_STATS[selected_lg]["h_avg"]
+lg_a_avg = LEAGUE_STATS[selected_lg]["a_avg"]
 
-with tab2:
-    st.header("Custom 'Sharp' Game Analysis")
-    st.info("Manually input data for games not in the live feed.")
+# --- MAIN: MANUAL INPUT ---
+st.subheader(f"Custom Match Analysis: {selected_lg}")
+col1, col2 = st.columns(2)
+
+with col1:
+    st.markdown("### 🏠 Home Team")
+    h_att = st.slider("Attack Strength (vs League Avg)", 0.5, 2.5, 1.2, help="1.0 is average. 1.5 means they score 50% more than average.")
+    h_def = st.slider("Defense Strength (Goals Allowed)", 0.5, 2.5, 0.9, help="Lower is better defense.")
+
+with col2:
+    st.markdown("### ✈️ Away Team")
+    a_att = st.slider("Away Attack Strength", 0.5, 2.5, 1.0)
+    a_def = st.slider("Away Defense Strength", 0.5, 2.5, 1.3)
+
+# --- THE SHARP CALCULATION ---
+# Formula: Home xG = (Home Att * Away Def) * League Home Avg
+h_final_xg = (h_att * a_def) * lg_h_avg
+a_final_xg = (a_att * h_def) * lg_a_avg
+
+if st.button("Calculate Sharp Probabilities"):
+    probs = calculate_market_probs(h_final_xg, a_final_xg)
     
-    col1, col2 = st.columns(2)
-    h_name = col1.text_input("Home Team Name", "Flamengo")
-    h_att = col1.slider("Home Attack Strength (xG)", 0.0, 5.0, 2.1)
+    st.divider()
+    st.write(f"### Predicted Scoreline: {h_final_xg:.2f} - {a_final_xg:.2f}")
     
-    a_name = col2.text_input("Away Team Name", "Palmeiras")
-    a_def = col2.slider("Away Defensive Weakness (xG allowed)", 0.0, 5.0, 1.3)
+    # --- GOAL MARKET DISPLAY ---
+    m1, m2, m3, m4 = st.columns(4)
     
-    if st.button("Run Sharp Simulation"):
-        # Sharp calculation: Home Att x Away Def / League Avg (Simulated as 1.3)
-        h_final = (h_att * a_def) / 1.3
-        # Similarly for away team
-        a_final = 1.2 # Baseline
+    with m1:
+        st.metric("Over 1.5", f"{probs['O1.5']:.1%}")
+        if probs['O1.5'] > 0.85: st.success("SHARP PICK")
         
-        hw, dr, aw, crazy = calculate_sharp_metrics(h_final, a_final)
+    with m2:
+        st.metric("Over 2.5", f"{probs['O2.5']:.1%}")
+        if probs['O2.5'] > 0.70: st.success("SHARP PICK")
         
-        st.write(f"### Final Prediction: {h_name} ({h_final:.2f}) vs {a_name} ({a_final:.2f})")
-        res_col1, res_col2 = st.columns(2)
-        res_col1.write(f"**Home Win Prob:** {hw:.1%}")
-        res_col1.write(f"**Draw Prob:** {dr:.1%}")
+    with m3:
+        st.metric("Over 3.5", f"{probs['O3.5']:.1%}")
+        if probs['O3.5'] > 0.50: st.warning("VALUE FOUND")
         
-        if crazy > 0.20:
-            st.balloons()
-            st.success(f"🔥 **HIGH SCORE ALERT:** {crazy:.1%} chance of 5+ goals!")
+    with m4:
+        st.metric("Over 4.5", f"{probs['O4.5']:.1%}")
+        if probs['O4.5'] > 0.25: 
+            st.error("🔥 CRAZY GAME")
+            st.toast("High probability of a blowout!")
+
+    # --- ADVANCED INSIGHT ---
+    st.info(f"**Insight:** Based on {selected_lg} averages, this match is expected to produce **{h_final_xg + a_final_xg:.2f}** total goals.")
