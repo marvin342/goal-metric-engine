@@ -1,35 +1,97 @@
 import streamlit as st
-import requests
+import api_manager
+from scipy.stats import poisson
 
-# Dictionary of League IDs from API-Football
+st.set_page_config(page_title="Goal Metric Engine", layout="wide")
+st.title("⚽ Goal Metric Engine: 80% Confidence Tracker")
+
+# League Mapping
 LEAGUES = {
     "Premier League (UK)": 39,
     "La Liga (Spain)": 140,
-    "Serie A (Brazil)": 71,
-    "Serie B (Brazil)": 72,
+    "Brazil Serie A": 71,
+    "Brazil Serie B": 72,
     "Bundesliga (Germany)": 78
 }
 
-st.title("🌍 Global Goal Metric Engine")
-
-# 1. Select League
-league_name = st.selectbox("Choose a League", list(LEAGUES.keys()))
+league_name = st.sidebar.selectbox("Select League", list(LEAGUES.keys()))
 league_id = LEAGUES[league_name]
 
-# 2. Fetch Live Data (Simplified Example)
-def get_league_stats(id):
-    # This would call the API to get current goals scored/conceded for all teams
-    # For now, we return a placeholder
-    return {"Arsenal": 2.1, "Man City": 2.5, "Flamengo": 1.8} 
+# The Prediction Logic
+def get_probability(home_avg, away_avg):
+    home_win = 0
+    draw = 0
+    for i in range(10): # Home goals
+        for j in range(10): # Away goals
+            prob = poisson.pmf(i, home_avg) * poisson.pmf(j, away_avg)
+            if i > j: home_win += prob
+            elif i == j: draw += prob
+    return home_win, draw, (1 - home_win - draw)
 
-stats = get_league_stats(league_id)
+if st.button("Generate High-Confidence Predictions"):
+    with st.spinner("Analyzing League Data..."):
+        fixtures = api_manager.fetch_fixtures(league_id)
+        
+        for game in fixtures:
+            home = game['teams']['home']['name']
+            away = game['teams']['away']['name']
+            
+            # Here, the AI simulates the game
+            # In a pro version, we'd use real team xG here
+            h_prob, d_prob, a_prob = get_probability(1.8, 1.1) 
+            
+            # THE 80% FILTER: Only highlight the best bets
+            if h_prob > 0.75:
+                st.success(f"🔥 HIGH CONFIDENCE: {home} Win ({h_prob:.1%})")
+            elif (h_prob + d_prob) > 0.85:
+                st.info(f"🛡️ SAFE BET: {home} or Draw (Double Chance)")
+            else:
+                st.write(f"⚖️ {home} vs {away}: Probabilities: H:{h_prob:.0%} D:{d_prob:.0%} A:{a_prob:.0%}")import streamlit as st
+import api_manager
+from scipy.stats import poisson
 
-# 3. Select Teams
-col1, col2 = st.columns(2)
-home_team = col1.selectbox("Home Team", list(stats.keys()))
-away_team = col2.selectbox("Away Team", list(stats.keys()))
+st.set_page_config(page_title="Goal Metric Engine", layout="wide")
+st.title("⚽ Goal Metric Engine: 80% Confidence Tracker")
 
-# 4. The Prediction
-if st.button("Analyze Match"):
-    # Real Poisson Math would happen here based on the stats we fetched
-    st.write(f"Analyzing {home_team} vs {away_team} in {league_name}...")
+# League Mapping
+LEAGUES = {
+    "Premier League (UK)": 39,
+    "La Liga (Spain)": 140,
+    "Brazil Serie A": 71,
+    "Brazil Serie B": 72,
+    "Bundesliga (Germany)": 78
+}
+
+league_name = st.sidebar.selectbox("Select League", list(LEAGUES.keys()))
+league_id = LEAGUES[league_name]
+
+# The Prediction Logic
+def get_probability(home_avg, away_avg):
+    home_win = 0
+    draw = 0
+    for i in range(10): # Home goals
+        for j in range(10): # Away goals
+            prob = poisson.pmf(i, home_avg) * poisson.pmf(j, away_avg)
+            if i > j: home_win += prob
+            elif i == j: draw += prob
+    return home_win, draw, (1 - home_win - draw)
+
+if st.button("Generate High-Confidence Predictions"):
+    with st.spinner("Analyzing League Data..."):
+        fixtures = api_manager.fetch_fixtures(league_id)
+        
+        for game in fixtures:
+            home = game['teams']['home']['name']
+            away = game['teams']['away']['name']
+            
+            # Here, the AI simulates the game
+            # In a pro version, we'd use real team xG here
+            h_prob, d_prob, a_prob = get_probability(1.8, 1.1) 
+            
+            # THE 80% FILTER: Only highlight the best bets
+            if h_prob > 0.75:
+                st.success(f"🔥 HIGH CONFIDENCE: {home} Win ({h_prob:.1%})")
+            elif (h_prob + d_prob) > 0.85:
+                st.info(f"🛡️ SAFE BET: {home} or Draw (Double Chance)")
+            else:
+                st.write(f"⚖️ {home} vs {away}: Probabilities: H:{h_prob:.0%} D:{d_prob:.0%} A:{a_prob:.0%}")
