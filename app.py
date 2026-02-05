@@ -1,75 +1,63 @@
 import streamlit as st
-import requests
+import pandas as pd
+import soccerdata as sd
 from scipy.stats import poisson
 
-# --- CONFIG ---
-st.set_page_config(page_title="Goal Metric Engine", layout="wide")
-API_KEY = st.secrets["FOOTBALL_API_KEY"]
-BASE_URL = "https://v3.football.api-sports.io/"
+st.set_page_config(page_title="Goal Metric Engine (Unlimited Free)", layout="wide")
 
-# --- DATA FETCHING ---
-def get_next_games(league_id, season):
-    headers = {
-        'x-rapidapi-host': "v3.football.api-sports.io", 
-        'x-rapidapi-key': API_KEY
-    }
-    # Using 'next=10' is the most bulletproof way to get data
-    url = f"{BASE_URL}fixtures?league={league_id}&season={season}&next=10"
-    
-    try:
-        response = requests.get(url, headers=headers)
-        data = response.json()
-        
-        # This part helps us debug if the API key is the problem
-        if "errors" in data and data["errors"]:
-            st.error(f"API Error: {data['errors']}")
-            return []
-            
-        return data.get('response', [])
-    except Exception as e:
-        st.error(f"Connection Error: {e}")
-        return []
+st.title("⚽ Goal Metric Engine (Scraper Edition)")
+st.info("No API Key needed! This pulls directly from FBref live data.")
 
-# --- MATH ---
-def calculate_confidence(home_avg, away_avg):
-    home_win_prob = 0
-    for i in range(7):
-        for j in range(i):
-            home_win_prob += poisson.pmf(i, home_avg) * poisson.pmf(j, away_avg)
-    return home_win_prob
-
-# --- UI ---
-st.title("⚽ Goal Metric Engine")
-
-# League Selection
+# League Selection (Supported by the scraper)
 leagues = {
-    "Premier League (UK)": {"id": 39, "season": 2025},
-    "Brazil Serie A": {"id": 71, "season": 2026},
-    "La Liga (Spain)": {"id": 140, "season": 2025}
+    "Premier League (UK)": "ENG-Premier League",
+    "La Liga (Spain)": "ESP-La Liga",
+    "Brazil Serie A": "BRA-Serie A"
 }
+selected_league = st.sidebar.selectbox("Select League", list(leagues.keys()))
 
-selected = st.selectbox("Choose League", list(leagues.keys()))
-l_id = leagues[selected]["id"]
-l_season = leagues[selected]["season"]
+@st.cache_data(ttl=3600) # Re-scrapes once per hour
+def get_live_data(league_name):
+    try:
+        # This pulls 2025/2026 data for free
+        fbref = sd.FBref(leagues=[league_name], seasons='2025')
+        schedule = fbref.read_schedule()
+        # Filter for upcoming games (result is NaN)
+        upcoming = schedule[schedule['result'].isna()]
+        return upcoming
+    except Exception as e:
+        st.error(f"Scraper error: {e}")
+        return pd.DataFrame()
 
-if st.button("Generate Predictions"):
-    with st.spinner("Talking to API..."):
-        fixtures = get_next_games(l_id, l_season)
-        
-        if not fixtures:
-            st.warning("⚠️ No matches returned. Your API key might still be activating, or you hit the 100-request limit.")
-        else:
-            for f in fixtures:
-                h_team = f['teams']['home']['name']
-                a_team = f['teams']['away']['name']
-                
-                # Using 1.9 vs 1.1 as a standard 'Heavy Favorite' simulation
-                prob = calculate_confidence(1.9, 1.1)
-                
-                with st.container():
-                    st.subheader(f"{h_team} vs {a_team}")
-                    if prob > 0.75:
-                        st.success(f"🔥 HIGH CONFIDENCE: {prob:.1%}")
-                    else:
-                        st.info(f"Win Probability: {prob:.1%}")
-                    st.divider()
+# 3. Predict Probability
+def predict_score(home_team, away_team):
+    # Base simulation: Standard favorite logic
+    # In a full version, we'd use team['xG'] here
+    home_exp = 1.8
+    away_exp = 1.1
+    prob = 0
+    for i in range(5):
+        for j in range(i):
+            prob += poisson.pmf(i, home_exp) * poisson.pmf(j, away_exp)
+    return prob
+
+# 4. Display Results
+if st.button(f"Scrape {selected_league} Matches"):
+    data = get_live_data(leagues[selected_league])
+    
+    if data.empty:
+        st.warning("No matches found for the next few days.")
+    else:
+        st.success(f"Found {len(data.head(10))} upcoming matches!")
+        for idx, row in data.head(10).iterrows():
+            h = row['home_team']
+            a = row['away_team']
+            prob = predict_score(h, a)
+            
+            with st.container():
+                st.subheader(f"{h} vs {a}")
+                if prob > 0.75:
+                    st.success(f"🔥 80% CONFIDENCE PICK: {prob:.1%}")
+                else:
+                    st.info(f"Win Probability: {prob:.1%}")
+                st.divider()
