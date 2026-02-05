@@ -2,9 +2,7 @@ streamlit
 pandas
 numpy
 scipy
-scikit-learn
-xgboost
-soccerdata
+fbrefdata
 beautifulsoup4
 lxml
 html5lib
