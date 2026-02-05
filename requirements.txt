@@ -3,7 +3,7 @@ pandas
 numpy
 scipy
 scikit-learn
-requests
 xgboost
-joblib
-python-dotenv
+soccerdata
+beautifulsoup4
+lxml
