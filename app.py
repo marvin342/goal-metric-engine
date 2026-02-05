@@ -21,6 +21,14 @@ st.markdown("""
         font-size: 28px;
         animation: pulse-red 0.8s infinite;
     }
+    .rigged-caution {
+        background-color: #ff9800;
+        color: black;
+        padding: 10px;
+        border-radius: 5px;
+        text-align: center;
+        font-weight: bold;
+    }
     @keyframes pulse-red {
         0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.7); }
         70% { transform: scale(1.05); box-shadow: 0 0 0 20px rgba(255, 0, 0, 0); }
@@ -43,25 +51,21 @@ LEAGUES = {
     "Brazil Serie B": "soccer_brazil_serie_b"
 }
 
-# --- CORE METRICS (YOUR CUSTOM SHARP LOGIC) ---
+# --- CORE METRICS ---
 def calculate_sharp_metrics(h_exp, a_exp):
     h_win, draw, away_win = 0, 0, 0
     o15, o25, o35, o45 = 0, 0, 0, 0
-
     for i in range(11):
         for j in range(11):
             prob = poisson.pmf(i, h_exp) * poisson.pmf(j, a_exp)
             total = i + j
-
             if i > j: h_win += prob
             elif i == j: draw += prob
             else: away_win += prob
-
             if total > 1.5: o15 += prob
             if total > 2.5: o25 += prob
             if total > 3.5: o35 += prob
             if total > 4.5: o45 += prob
-
     return {
         "win": (h_win, draw, away_win),
         "overs": {"1.5": o15, "2.5": o25, "3.5": o35, "4.5": o45}
@@ -77,16 +81,16 @@ def score_distribution_health(h_exp, a_exp):
     entropy = -sum(p * math.log(p) for p in probs if p > 0)
     return top3, entropy
 
-tab1, tab2 = st.tabs(["📡 Live Global Feed", "🎯 Custom Sharp Section"])
+tab1, tab2 = st.tabs(["📡 🔥 Sharp Trusted Picks", "🎯 Custom Sharp Section"])
 
 # =======================
-# 📡 LIVE GLOBAL FEED
+# 📡 🔥 SHARP TRUSTED PICKS
 # =======================
 with tab1:
-    st.header("Live Fixtures & Overs Scanner")
+    st.header("Live Feed: Trusted Overs & Market Health")
     selected_name = st.selectbox("Choose League", list(LEAGUES.keys()))
 
-    if st.button("Fetch Live Predictions"):
+    if st.button("Fetch High-Confidence Picks"):
         res = requests.get(
             f"{BASE_URL}{LEAGUES[selected_name]}/odds",
             params={"apiKey": API_KEY, "regions": "uk", "oddsFormat": "decimal"},
@@ -98,9 +102,8 @@ with tab1:
         else:
             for m in matches[:12]:
                 is_serie_b = "Serie B" in selected_name
-                # TIGHTENED BASE xG FOR HIGHER QUALITY SIGNALS
-                base_h = 1.25 if is_serie_b else 1.70
-                base_a = 1.05 if is_serie_b else 1.40
+                base_h = 1.35 if is_serie_b else 1.80
+                base_a = 1.15 if is_serie_b else 1.50
 
                 h_xg = base_h + (len(m["home_team"]) % 3) * 0.20
                 a_xg = base_a + (len(m["away_team"]) % 3) * 0.20
@@ -109,43 +112,44 @@ with tab1:
                 top3, entropy = score_distribution_health(h_xg, a_xg)
                 over25 = metrics["overs"]["2.5"]
                 
-                # --- STRICT NUKE FILTER ---
-                sharp_signal = over25 > 0.82 and (h_xg + a_xg) > 3.3
+                # --- NUKE & RIGGED LOGIC ---
+                is_nuke = over25 > 0.83 and (h_xg + a_xg) > 3.4
+                is_suspicious = entropy < 2.05 # Flagging low variance as "suspicious"
 
-                with st.expander(f"{m['home_team']} vs {m['away_team']} (Sharp xG: {h_xg + a_xg:.2f})"):
-                    if sharp_signal:
-                        st.markdown('<div class="nuke-box">☢️ SHARP OVER SIGNAL (NUKE) ☢️</div>', unsafe_allow_html=True)
+                with st.expander(f"{m['home_team']} vs {m['away_team']} (Sharp Total xG: {h_xg + a_xg:.2f})"):
+                    if is_nuke:
+                        st.markdown('<div class="nuke-box">☢️ NUKE DETECTED: TRUSTED PICK ☢️</div>', unsafe_allow_html=True)
                         st.balloons()
                     
+                    if is_suspicious:
+                        st.markdown('<div class="rigged-caution">⚠️ CAUTION: Abnormal Scoring Pattern Detected ("Rigged" Risk)</div>', unsafe_allow_html=True)
+
                     cols = st.columns(4)
                     for i, (label, val) in enumerate(metrics["overs"].items()):
-                        if val > 0.80:
-                            cols[i].metric(f"Over {label}", f"{val:.0%}", delta="🔥 NUKE")
-                        else:
-                            cols[i].metric(f"Over {label}", f"{val:.0%}")
+                        status = "🔥 NUKE" if val > 0.85 else "TRUSTED" if val > 0.75 else None
+                        cols[i].metric(f"Over {label}", f"{val:.0%}", delta=status)
                     st.divider()
 
 # =======================
 # 🎯 CUSTOM SHARP SECTION
 # =======================
 with tab2:
-    st.header("Sharp Manual Tool")
+    st.header("Manual Sharp Analysis Terminal")
     c1, c2 = st.columns(2)
-    h_xg_in = c1.number_input("Home Team Expected Goals", 0.0, 5.0, 2.3) 
+    h_xg_in = c1.number_input("Home Team Expected Goals", 0.0, 5.0, 2.4) 
     a_xg_in = c2.number_input("Away Team Expected Goals", 0.0, 5.0, 1.9)
 
     if st.button("Run Custom Analysis"):
         m = calculate_sharp_metrics(h_xg_in, a_xg_in)
-        st.write("### Score Prediction Probability")
+        st.write("### Probability Results")
         res_cols = st.columns(4)
         
         for i, (label, val) in enumerate(m["overs"].items()):
             if val > 0.85:
                 res_cols[i].metric(f"Over {label}", f"{val:.1%}", delta="☢️ NUKE")
-                st.markdown(f'<div class="nuke-box">☢️ MAXIMUM CONVICTION: {val:.1%} CHANCE ☢️</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="nuke-box">☢️ MAX CONVICTION: {val:.1%} ☢️</div>', unsafe_allow_html=True)
                 st.balloons()
             elif val > 0.75:
-                res_cols[i].metric(f"Over {label}", f"{val:.1%}", delta="STRONG")
-                res_cols[i].success("VALUE PICK")
+                res_cols[i].metric(f"Over {label}", f"{val:.1%}", delta="TRUSTED")
             else:
                 res_cols[i].metric(f"Over {label}", f"{val:.1%}")
