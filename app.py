@@ -7,7 +7,7 @@ import math
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Sharp Goal Engine v7 - NUKE EDITION", layout="wide", page_icon="☢️")
 
-# --- NUKE STYLING ---
+# --- NUKE STYLING (FIXED TypeError) ---
 st.markdown("""
     <style>
     .nuke-box {
@@ -18,7 +18,8 @@ st.markdown("""
         border: 5px solid black;
         text-align: center;
         font-weight: bold;
-        animation: pulse-red 1s infinite;
+        font-size: 28px;
+        animation: pulse-red 0.8s infinite;
     }
     @keyframes pulse-red {
         0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.7); }
@@ -26,7 +27,7 @@ st.markdown("""
         100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 0, 0, 0); }
     }
     </style>
-    """, unsafe_allow_stdio=True)
+    """, unsafe_allow_html=True)
 
 # --- CONFIG ---
 API_KEY = "2bbe95bafab32dd8fa0be8ae23608feb"
@@ -116,53 +117,32 @@ with tab1:
 
                 with st.expander(f"{m['home_team']} vs {m['away_team']} (Sharp xG: {h_xg + a_xg:.2f})"):
                     if sharp_signal:
-                        st.markdown('<div class="nuke-box">☢️ NUKE DETECTED: HIGH PROBABILITY OVER ☢️</div>', unsafe_allow_stdio=True)
+                        st.markdown('<div class="nuke-box">☢️ SHARP OVER SIGNAL (NUKE) ☢️</div>', unsafe_allow_html=True)
                     
                     cols = st.columns(4)
                     for i, (label, val) in enumerate(metrics["overs"].items()):
                         cols[i].metric(f"Over {label}", f"{val:.0%}")
+                    st.divider()
 
 # =======================
-# 🎯 CUSTOM SHARP SECTION (The "Nuke" Upgrade)
+# 🎯 CUSTOM SHARP SECTION
 # =======================
 with tab2:
     st.header("Sharp Manual Tool")
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
     h_xg_in = c1.number_input("Home Team Expected Goals", 0.0, 5.0, 1.8)
     a_xg_in = c2.number_input("Away Team Expected Goals", 0.0, 5.0, 1.2)
-    bookie_odds = c3.number_input("Current Bookie Odds (Decimal)", 1.01, 10.0, 1.90)
 
     if st.button("Run Custom Analysis"):
         m = calculate_sharp_metrics(h_xg_in, a_xg_in)
-        
-        # --- Value Logic ---
-        prob_25 = m["overs"]["2.5"]
-        fair_odds = 1 / prob_25 if prob_25 > 0 else 0
-        edge = (prob_25 * bookie_odds) - 1
-        
         st.write("### Score Prediction Probability")
         res_cols = st.columns(4)
         for i, (label, val) in enumerate(m["overs"].items()):
             res_cols[i].metric(f"Over {label}", f"{val:.1%}")
             
             # --- SUPER STRONG NUKE FEEDBACK ---
-            if val > 0.78:
-                st.markdown(f'<div class="nuke-box">☢️ NUKE ALERT: {val:.1%} CHANCE FOR OVER {label} ☢️</div>', unsafe_allow_stdio=True)
-                st.balloons()
-            elif val > 0.70:
+            if val > 0.70:
                 res_cols[i].success("Value Pick")
-
-        st.divider()
-        
-        # --- PRO ANALYTICS ---
-        st.subheader("📊 The Sharp Edge Analysis")
-        b1, b2, b3 = st.columns(3)
-        b1.metric("Fair Odds", f"{fair_odds:.2f}")
-        b2.metric("Mathematical Edge", f"{edge:+.1%}")
-        
-        if edge > 0.10:
-            b3.error("BULLSEYE: BOOKIE ERROR")
-        else:
-            b3.info("Normal Market Variance")
-
-        # Visualizing the Poisson distribution
+                if val > 0.80: # Extra strong trigger
+                    st.markdown(f'<div class="nuke-box">☢️ NUKE THE LINE: {label} @ {val:.1%} ☢️</div>', unsafe_allow_html=True)
+                    st.balloons()
