@@ -1,46 +1,75 @@
 import streamlit as st
 import requests
 from scipy.stats import poisson
-from datetime import datetime
 
 # --- CONFIG ---
 st.set_page_config(page_title="Goal Metric Engine", layout="wide")
 API_KEY = st.secrets["FOOTBALL_API_KEY"]
 BASE_URL = "https://v3.football.api-sports.io/"
 
-# --- LEAGUE SETTINGS ---
-LEAGUES = {
+# --- DATA FETCHING ---
+def get_next_games(league_id, season):
+    headers = {
+        'x-rapidapi-host': "v3.football.api-sports.io", 
+        'x-rapidapi-key': API_KEY
+    }
+    # Using 'next=10' is the most bulletproof way to get data
+    url = f"{BASE_URL}fixtures?league={league_id}&season={season}&next=10"
+    
+    try:
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        
+        # This part helps us debug if the API key is the problem
+        if "errors" in data and data["errors"]:
+            st.error(f"API Error: {data['errors']}")
+            return []
+            
+        return data.get('response', [])
+    except Exception as e:
+        st.error(f"Connection Error: {e}")
+        return []
+
+# --- MATH ---
+def calculate_confidence(home_avg, away_avg):
+    home_win_prob = 0
+    for i in range(7):
+        for j in range(i):
+            home_win_prob += poisson.pmf(i, home_avg) * poisson.pmf(j, away_avg)
+    return home_win_prob
+
+# --- UI ---
+st.title("⚽ Goal Metric Engine")
+
+# League Selection
+leagues = {
     "Premier League (UK)": {"id": 39, "season": 2025},
-    "La Liga (Spain)": {"id": 140, "season": 2025},
-    "Brazil Serie A": {"id": 71, "season": 2026}, # Brazil 2026 season started Jan 28!
-    "Brazil Serie B": {"id": 72, "season": 2026}
+    "Brazil Serie A": {"id": 71, "season": 2026},
+    "La Liga (Spain)": {"id": 140, "season": 2025}
 }
 
-def get_fixtures(league_id, season):
-    headers = {'x-rapidapi-host': "v3.football.api-sports.io", 'x-rapidapi-key': API_KEY}
-    # Using 'from' and 'to' to find games for the next 7 days
-    today = datetime.now().strftime('%Y-%m-%d')
-    url = f"{BASE_URL}fixtures?league={league_id}&season={season}&from={today}&to=2026-02-15"
-    
-    res = requests.get(url, headers=headers).json()
-    return res.get('response', [])
+selected = st.selectbox("Choose League", list(leagues.keys()))
+l_id = leagues[selected]["id"]
+l_season = leagues[selected]["season"]
 
-# --- INTERFACE ---
-st.title("⚽ Goal Metric Engine")
-selected_name = st.sidebar.selectbox("Select League", list(LEAGUES.keys()))
-league_id = LEAGUES[selected_name]["id"]
-season = LEAGUES[selected_name]["season"]
-
-if st.button("Check Live Fixtures"):
-    fixtures = get_fixtures(league_id, season)
-    
-    if not fixtures:
-        st.error(f"No games found for {selected_name} in the next 10 days.")
-        st.info("💡 Tip: If you just created your API key, it can take 1-2 hours to activate.")
-    else:
-        st.success(f"Found {len(fixtures)} upcoming matches!")
-        for f in fixtures:
-            home = f['teams']['home']['name']
-            away = f['teams']['away']['name']
-            date = f['fixture']['date'][:10]
-            st.write(f"**{date}** | {home} vs {away}")
+if st.button("Generate Predictions"):
+    with st.spinner("Talking to API..."):
+        fixtures = get_next_games(l_id, l_season)
+        
+        if not fixtures:
+            st.warning("⚠️ No matches returned. Your API key might still be activating, or you hit the 100-request limit.")
+        else:
+            for f in fixtures:
+                h_team = f['teams']['home']['name']
+                a_team = f['teams']['away']['name']
+                
+                # Using 1.9 vs 1.1 as a standard 'Heavy Favorite' simulation
+                prob = calculate_confidence(1.9, 1.1)
+                
+                with st.container():
+                    st.subheader(f"{h_team} vs {a_team}")
+                    if prob > 0.75:
+                        st.success(f"🔥 HIGH CONFIDENCE: {prob:.1%}")
+                    else:
+                        st.info(f"Win Probability: {prob:.1%}")
+                    st.divider()
