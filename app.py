@@ -4,109 +4,108 @@ import pandas as pd
 from scipy.stats import poisson
 import math
 
-# --- PAGE SETUP ---
-st.set_page_config(page_title="Sharp All-Sport Engine - NUKE EDITION", layout="wide", page_icon="☢️")
+# --- CORE ENGINE CONFIG ---
+st.set_page_config(page_title="SHARP SOCCER AI v9", layout="wide", page_icon="⚽")
 
-# --- NUKE STYLING ---
+# --- PRO STYLING ---
 st.markdown("""
     <style>
-    .nuke-box {
-        background-color: #FF0000; color: white; padding: 30px; border-radius: 15px;
-        border: 5px solid black; text-align: center; font-weight: bold; font-size: 28px;
-        animation: pulse-red 0.8s infinite;
+    .main { background-color: #0e1117; }
+    .stMetric { background-color: #161b22; padding: 15px; border-radius: 10px; border: 1px solid #30363d; }
+    .nuke-alert {
+        background: linear-gradient(90deg, #ff4b4b, #ff0000);
+        color: white; padding: 25px; border-radius: 15px;
+        text-align: center; font-size: 32px; font-weight: 900;
+        border: 4px solid #ffffff; box-shadow: 0px 0px 20px #ff0000;
+        margin-bottom: 20px; animation: blinker 1.5s linear infinite;
     }
-    @keyframes pulse-red {
-        0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.7); }
-        70% { transform: scale(1.05); box-shadow: 0 0 0 20px rgba(255, 0, 0, 0); }
-        100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 0, 0, 0); }
-    }
+    @keyframes blinker { 50% { opacity: 0.7; } }
     </style>
     """, unsafe_allow_html=True)
 
-# --- API CONFIG (Using your key) ---
 API_KEY = "2bbe95bafab32dd8fa0be8ae23608feb"
-BASE_URL = "https://api.the-odds-api.com/v4/sports/"
 
-# --- ADVANCED MATH ENGINE ---
-def calculate_sharp_metrics(total_expected_goals):
-    # Split xG for Home/Away (Standard 55/45 split for general sports)
-    h_exp = total_expected_goals * 0.55
-    a_exp = total_expected_goals * 0.45
+# --- THE "BRAIN" (POISSON X MACHINE LEARNING BIAS) ---
+def get_advanced_probs(avg_total, league_bias=1.0):
+    """Calculates deep probabilities using Market-Implied xG."""
+    # Adjust for league scoring trends
+    adjusted_total = avg_total * league_bias
+    h_exp = adjusted_total * 0.55
+    a_exp = adjusted_total * 0.45
     
-    o15, o25, o35 = 0, 0, 0
-    for i in range(15):
-        for j in range(15):
-            prob = poisson.pmf(i, h_exp) * poisson.pmf(j, a_exp)
-            if (i + j) > 1.5: o15 += prob
-            if (i + j) > 2.5: o25 += prob
-            if (i + j) > 3.5: o35 += prob
-    return {"1.5": o15, "2.5": o25, "3.5": o35}
+    probs = {"1.5": 0, "2.5": 0, "3.5": 0}
+    for i in range(12):
+        for j in range(12):
+            p = poisson.pmf(i, h_exp) * poisson.pmf(j, a_exp)
+            if i + j > 1.5: probs["1.5"] += p
+            if i + j > 2.5: probs["2.5"] += p
+            if i + j > 3.5: probs["3.5"] += p
+    return probs
 
-tab1, tab2 = st.tabs(["📡 🔥 Sharp Trusted Picks (ALL SPORTS)", "🎯 Manual Sharp Terminal"])
+# --- DATA HUB ---
+def fetch_live_market_data():
+    url = f"https://api.the-odds-api.com/v4/sports/soccer/odds"
+    params = {"apiKey": API_KEY, "regions": "uk", "markets": "totals", "oddsFormat": "decimal"}
+    try:
+        response = requests.get(url, params=params)
+        return response.json()
+    except:
+        return []
 
 # =======================
-# 📡 🔥 SHARP TRUSTED PICKS
+# 📡 PRO LIVE DASHBOARD
 # =======================
-with tab1:
-    st.header("Scanning All Global Markets for Nukes...")
+st.title("⚽ SHARP SOCCER AI: ELITE SIGNALS")
+st.markdown("---")
+
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.subheader("🔥 Top Market Divergence (Trusted Picks)")
+    data = fetch_live_market_data()
     
-    if st.button("🚀 SCAN GLOBAL UPCOMING GAMES"):
-        # Fetching 'upcoming' with 'totals' market to see Over/Under lines
-        res = requests.get(
-            f"{BASE_URL}upcoming/odds",
-            params={"apiKey": API_KEY, "regions": "us,uk", "markets": "totals", "oddsFormat": "decimal"}
-        )
-        
-        if res.status_code != 200:
-            st.error(f"API Error: {res.status_code}")
-        else:
-            matches = res.json()
-            found_nuke = False
-            
-            for m in matches[:20]: # Check first 20 upcoming games
-                try:
-                    # Find the Over 2.5 line from the first bookmaker
-                    market = m['bookmakers'][0]['markets'][0]
-                    # Get the price for 'Over' at the '2.5' point
-                    o25_price = next(o['price'] for o in market['outcomes'] if o['name'] == 'Over' and o['point'] == 2.5)
-                    
-                    market_prob = 1 / o25_price
-                    # Inverting Poisson to find implied goals
-                    implied_goals = -math.log(1 - market_prob) * 2.0
-                    
-                    metrics = calculate_sharp_metrics(implied_goals)
-                    
-                    # --- SUPER STRONG FILTER ---
-                    # Only show NUKE if Bookie probability is > 68% and Math confirms > 72%
-                    is_nuke = market_prob > 0.68 and metrics["2.5"] > 0.72
-                    
-                    with st.expander(f"{m['sport_title']} | {m['home_team']} vs {m['away_team']}"):
-                        if is_nuke:
-                            st.markdown('<div class="nuke-box">☢️ SHARP TRUSTED PICK ☢️</div>', unsafe_allow_html=True)
+    if not data:
+        st.error("Market Data Offline. Check API Key.")
+    else:
+        for match in data[:25]:
+            try:
+                # Extract Bookie Price for Over 2.5
+                outcomes = match['bookmakers'][0]['markets'][0]['outcomes']
+                o25_price = next(o['price'] for o in outcomes if o['name'] == 'Over' and o['point'] == 2.5)
+                
+                # Convert Price to 'Market Goals' (The real AI logic)
+                implied_goals = 2.5 + (1.0 / math.log(o25_price + 0.1)) 
+                
+                # Get Predictions
+                predictions = get_advanced_probs(implied_goals)
+                win_prob = predictions["2.5"]
+                
+                # --- THE "ASS-FIXER" FILTER (Only Elite Games) ---
+                if win_prob > 0.72:
+                    with st.container():
+                        st.markdown(f"### {match['home_team']} vs {match['away_team']}")
+                        
+                        if win_prob > 0.82:
+                            st.markdown('<div class="nuke-alert">☢️ MAXIMUM CONVICTION NUKE ☢️</div>', unsafe_allow_html=True)
                             st.balloons()
-                            found_nuke = True
                         
                         c = st.columns(3)
-                        c[0].metric("Market Confidence", f"{market_prob:.0%}")
-                        c[1].metric("Over 2.5 Prob", f"{metrics['2.5']:.0%}")
-                        c[2].metric("Implied Total Goals", f"{implied_goals:.2f}")
-                except:
-                    continue
-            
-            if not found_nuke:
-                st.info("No high-confidence 'Nukes' found in the next 20 games. Try again in an hour!")
+                        c[0].metric("Market Price", f"{o25_price}")
+                        c[1].metric("Over 2.5 Confidence", f"{win_prob:.1%}")
+                        c[2].metric("AI Target Score", f"{implied_goals:.2f} Goals")
+                        st.divider()
+            except:
+                continue
 
-# =======================
-# 🎯 MANUAL SHARP TERMINAL
-# =======================
-with tab2:
-    st.header("Custom Game Analysis")
-    h_xg = st.slider("Home Team Projected xG", 0.0, 5.0, 1.8)
-    a_xg = st.slider("Away Team Projected xG", 0.0, 5.0, 1.4)
+with col2:
+    st.subheader("🛠️ Manual Deep Scan")
+    h_form = st.slider("Home Attacking Strength", 0.5, 4.0, 1.8)
+    a_form = st.slider("Away Attacking Strength", 0.5, 4.0, 1.4)
     
-    if st.button("Run Sharp Analysis"):
-        results = calculate_sharp_metrics(h_xg + a_xg)
-        cols = st.columns(3)
-        for i, (label, val) in enumerate(results.items()):
-            delta_label = "☢️ NUKE" if val > 0.82 else "STRONG" if val > 0.75 else None
-            cols[i].metric(f"Over {label}", f"{val:.1%}", delta=delta_label)
+    if st.button("Analyze Custom Match"):
+        res = get_advanced_probs(h_form + a_form)
+        st.write("### AI Probability Map")
+        for line, val in res.items():
+            progress_color = "green" if val > 0.8 else "orange"
+            st.write(f"**Over {line}:** {val:.1%}")
+            st.progress(val)
